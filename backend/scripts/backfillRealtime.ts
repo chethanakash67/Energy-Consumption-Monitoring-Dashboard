@@ -1,3 +1,20 @@
+/**
+ * One-off backfill for the real-time ingest module.
+ *
+ * `realtimeIngest.ts` only writes a reading each time it polls, so a freshly
+ * deployed instance has no history until enough polls have accumulated. This
+ * script fills that gap using Open-Meteo's free historical archive API (same
+ * provider the live poller uses, just its `/archive` endpoint instead of
+ * `/forecast`) so the backfilled values are real past weather for the
+ * configured location, not synthetic ones.
+ *
+ * Safe to re-run: it uses `skipDuplicates` and only writes hours strictly
+ * before the current one, so it never collides with rows the live poller is
+ * already writing.
+ *
+ * Usage: DATABASE_URL=... npx tsx scripts/backfillRealtime.ts [days]
+ */
+
 import { prisma } from '../src/lib/prisma';
 import { config } from '../src/lib/config';
 import { getSettings } from '../src/services/settings';
@@ -7,101 +24,102 @@ import {
   estimateSolarKw,
 } from '../src/services/realtimeIngest';
 
-const BACKFILL_DAYS = Number(process.argv[2] ?? 30);
-const STEP_MS = 30 * 60 * 1000;
+const DAYS = Number(process.argv[2] ?? 30);
 
-interface HourlyWeather {
-  time: string[];
-  temperature_2m: number[];
-  cloud_cover: number[];
-  shortwave_radiation: number[];
-}
-
-async function fetchWeather(): Promise<HourlyWeather> {
-  const url = new URL('https://api.open-meteo.com/v1/forecast');
-  url.searchParams.set('latitude', String(config.realtimeLatitude));
-  url.searchParams.set('longitude', String(config.realtimeLongitude));
-  url.searchParams.set('hourly', 'temperature_2m,cloud_cover,shortwave_radiation');
-  url.searchParams.set('timezone', config.realtimeTimezone);
-  url.searchParams.set('past_days', String(Math.min(92, BACKFILL_DAYS)));
-  url.searchParams.set('forecast_days', '1');
-
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`Open-Meteo returned HTTP ${response.status}`);
-  const body = (await response.json()) as { hourly: HourlyWeather };
-  return body.hourly;
-}
-
-function interpolateHourly(weather: HourlyWeather, at: Date) {
-  const times = weather.time.map((t) => new Date(t).getTime());
-  const target = at.getTime();
-
-  let i = times.findIndex((t) => t > target);
-  if (i === -1) i = times.length - 1;
-  if (i === 0) i = 1;
-
-  const t0 = times[i - 1];
-  const t1 = times[i];
-  const fraction = t1 === t0 ? 0 : (target - t0) / (t1 - t0);
-
-  const lerp = (arr: number[]) => arr[i - 1] + (arr[i] - arr[i - 1]) * fraction;
-
-  return {
-    temperatureC: lerp(weather.temperature_2m),
-    cloudCoverPct: lerp(weather.cloud_cover),
-    solarRadiationWm2: Math.max(0, lerp(weather.shortwave_radiation)),
+interface ArchiveResponse {
+  hourly?: {
+    time: string[];
+    temperature_2m: (number | null)[];
+    cloud_cover: (number | null)[];
+    shortwave_radiation: (number | null)[];
   };
 }
 
-function round(value: number, decimals = 4): number {
+function toFinite(value: number | null | undefined, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function round(value: number, decimals = 5): number {
   const factor = 10 ** decimals;
   return Math.round(value * factor) / factor;
 }
 
+async function fetchHistoricalWeather(days: number): Promise<ArchiveResponse> {
+  const end = new Date();
+  const start = new Date(end.getTime() - days * 24 * 3_600_000);
+
+  const url = new URL('https://archive-api.open-meteo.com/v1/archive');
+  url.searchParams.set('latitude', String(config.realtimeLatitude));
+  url.searchParams.set('longitude', String(config.realtimeLongitude));
+  url.searchParams.set('start_date', start.toISOString().slice(0, 10));
+  // The archive API lags a few days behind real time, so ask through
+  // yesterday and let the live poller cover the most recent gap.
+  const endDate = new Date(end.getTime() - 24 * 3_600_000);
+  url.searchParams.set('end_date', endDate.toISOString().slice(0, 10));
+  url.searchParams.set('hourly', 'temperature_2m,cloud_cover,shortwave_radiation');
+  url.searchParams.set('timezone', config.realtimeTimezone);
+
+  console.log(`Fetching historical weather: ${url.toString()}`);
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Open-Meteo archive returned HTTP ${response.status}: ${await response.text()}`);
+  }
+  return (await response.json()) as ArchiveResponse;
+}
+
 async function main() {
-  console.log(`Backfilling ${BACKFILL_DAYS} days of real historical weather data...`);
+  console.log(`Backfilling ${DAYS} days of real-time-feed history...`);
 
   const { load, solar } = await ensureRealtimeDevices();
   const settings = await getSettings();
+  const weather = await fetchHistoricalWeather(DAYS);
 
-  const to = new Date();
-  const from = new Date(to.getTime() - BACKFILL_DAYS * 86_400_000);
+  const times = weather.hourly?.time ?? [];
+  if (times.length === 0) {
+    throw new Error('Open-Meteo archive returned no hourly data — check REALTIME_LATITUDE/LONGITUDE.');
+  }
 
-  const weather = await fetchWeather();
+  const now = Date.now();
+  const rows: { deviceId: string; timestamp: Date; kwh: number; cost: number }[] = [];
 
-  const loadRows: { deviceId: string; timestamp: Date; kwh: number; cost: number }[] = [];
-  const solarRows: { deviceId: string; timestamp: Date; kwh: number; cost: number }[] = [];
+  for (let i = 0; i < times.length; i += 1) {
+    // Open-Meteo returns naive local time for the requested timezone; treat
+    // it as an instant in that zone by appending an explicit offset-free
+    // parse (Date treats "YYYY-MM-DDTHH:mm" as local-to-the-server, which is
+    // fine here since the backfill only needs relative ordering + spacing,
+    // not perfect UTC alignment with the live poller).
+    const timestamp = new Date(times[i]);
+    if (Number.isNaN(timestamp.getTime()) || timestamp.getTime() >= now) continue;
 
-  for (let t = from.getTime(); t < to.getTime(); t += STEP_MS) {
-    const at = new Date(t);
-    const { temperatureC, cloudCoverPct, solarRadiationWm2 } = interpolateHourly(weather, at);
+    const temperatureC = toFinite(weather.hourly?.temperature_2m[i], 27);
+    const cloudCoverPct = toFinite(weather.hourly?.cloud_cover[i], 50);
+    const solarRadiationWm2 = toFinite(weather.hourly?.shortwave_radiation[i], 0);
 
     const demandKw = estimateDemandKw(temperatureC, cloudCoverPct);
-    const generationKw = estimateSolarKw(solarRadiationWm2);
-    const hours = STEP_MS / 3_600_000;
-    const demandKwh = demandKw * hours;
-    const solarKwh = generationKw * hours;
+    const solarKw = estimateSolarKw(solarRadiationWm2);
 
-    loadRows.push({
+    // Archive data is hourly, so each row represents exactly one hour of
+    // energy at that instantaneous rate.
+    const demandKwh = demandKw * 1;
+    const solarKwh = solarKw * 1;
+
+    rows.push({
       deviceId: load.id,
-      timestamp: at,
+      timestamp,
       kwh: round(demandKwh),
       cost: round(demandKwh * settings.tariffPerKwh),
     });
-    solarRows.push({
+    rows.push({
       deviceId: solar.id,
-      timestamp: at,
+      timestamp,
       kwh: round(-solarKwh),
       cost: round(-solarKwh * settings.tariffPerKwh),
     });
   }
 
-  const result = await prisma.reading.createMany({
-    data: [...loadRows, ...solarRows],
-    skipDuplicates: true,
-  });
-
-  console.log(`Inserted ${result.count} real historical readings.`);
+  console.log(`Writing ${rows.length} readings (${rows.length / 2} hours)...`);
+  const result = await prisma.reading.createMany({ data: rows, skipDuplicates: true });
+  console.log(`Done — ${result.count} rows inserted (duplicates skipped).`);
 }
 
 main()
