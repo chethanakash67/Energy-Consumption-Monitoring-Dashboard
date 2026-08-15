@@ -1,0 +1,386 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ==========================================================================
+   Design tokens
+   --------------------------------------------------------------------------
+   The single source of truth for the product's visual language. Tailwind maps
+   its colour/radius/shadow scales onto these variables, so a component never
+   names a raw hex value.
+
+   The categorical series palette was validated with the data-viz palette
+   checker (lightness band, chroma floor, Machado-2009 CVD separation, and
+   contrast against each mode's chart surface). Both modes pass all six checks:
+   worst adjacent CVD ΔE is 23.6 in light and 24.0 in dark, against a target of
+   12. The dark steps are a *selected* set for the dark surface, not an
+   inversion of the light ones.
+   ========================================================================== */
+
+@layer base {
+  :root {
+    /* -- Surfaces ------------------------------------------------------- */
+    --bg-canvas: #f5f6f9;
+    --bg-surface: #ffffff;
+    --bg-surface-raised: #ffffff;
+    --bg-subtle: #f0f2f6;
+    --bg-inset: #eaedf2;
+
+    /* -- Borders -------------------------------------------------------- */
+    --border-subtle: #e5e8ef;
+    --border-strong: #d2d7e1;
+
+    /* -- Ink ------------------------------------------------------------ */
+    --text-primary: #0c1017;
+    --text-secondary: #4a5261;
+    --text-muted: #79808f;
+    --text-inverse: #ffffff;
+
+    /* -- Brand ---------------------------------------------------------- */
+    --brand: #3b6fe0;
+    --brand-hover: #2e5cc4;
+    --brand-subtle: #eef3fd;
+    --brand-ring: rgba(59, 111, 224, 0.35);
+    --brand-fg: #ffffff;
+
+    /* -- Semantic energy states ----------------------------------------- *
+     * optimal  : running at or below expected draw
+     * elevated : above expected, worth a look
+     * high     : sustained overuse
+     * critical : threshold breach / fault
+     * Each pairs a mark colour, a wash for badge backgrounds, and a text
+     * colour that clears 4.5:1 on that wash.                              */
+    --status-optimal: #0f9d63;
+    --status-optimal-subtle: #e6f6ef;
+    --status-optimal-fg: #07603c;
+
+    --status-elevated: #c27803;
+    --status-elevated-subtle: #fdf3e0;
+    --status-elevated-fg: #7c4c00;
+
+    --status-high: #dd5c2e;
+    --status-high-subtle: #fdeee7;
+    --status-high-fg: #8c3512;
+
+    --status-critical: #d13b3b;
+    --status-critical-subtle: #fdecec;
+    --status-critical-fg: #8f2020;
+
+    /* -- Categorical series (validated, fixed order) --------------------- */
+    --series-1: #3b6fe0;
+    --series-2: #0e9f6e;
+    --series-3: #c27803;
+    --series-4: #15803d;
+    --series-5: #6d4aeb;
+    --series-6: #dc3f41;
+    --series-7: #d9679a;
+    --series-8: #dd5c2e;
+
+    /* -- Sequential ramp (single hue, light -> dark) --------------------- *
+     * Used by the peak-usage heatmap, where colour encodes magnitude.      */
+    --seq-1: #eef3fd;
+    --seq-2: #d7e4fa;
+    --seq-3: #b9d0f5;
+    --seq-4: #93b5ef;
+    --seq-5: #6c98e8;
+    --seq-6: #4a7ce2;
+    --seq-7: #2f5cba;
+
+    /* -- Chart chrome --------------------------------------------------- */
+    --chart-grid: #eceff4;
+    --chart-axis: #c9cfda;
+
+    /* -- Radii ---------------------------------------------------------- */
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 14px;
+    --radius-xl: 18px;
+    --radius-2xl: 24px;
+
+    /* -- Elevation ------------------------------------------------------ */
+    --shadow-xs: 0 1px 2px rgba(12, 16, 23, 0.04);
+    --shadow-sm: 0 1px 2px rgba(12, 16, 23, 0.05), 0 1px 3px rgba(12, 16, 23, 0.04);
+    --shadow-md: 0 2px 4px rgba(12, 16, 23, 0.04), 0 4px 12px rgba(12, 16, 23, 0.06);
+    --shadow-lg: 0 4px 8px rgba(12, 16, 23, 0.04), 0 12px 28px rgba(12, 16, 23, 0.09);
+    --shadow-pop: 0 8px 16px rgba(12, 16, 23, 0.06), 0 20px 48px rgba(12, 16, 23, 0.14);
+
+    /* -- Glass surfaces --------------------------------------------------
+     * "Glass Control Room" system. Top-level surfaces (cards, panels, the
+     * sidebar, modals) sit on frosted glass so the ambient glow underneath
+     * reads through; nested inset elements (badge pills, metric tiles)
+     * deliberately stay opaque — layering glass on glass goes muddy fast. */
+    --glass-bg: rgba(255, 255, 255, 0.66);
+    --glass-bg-strong: rgba(255, 255, 255, 0.82);
+    --glass-border: rgba(17, 22, 32, 0.08);
+    --glass-highlight: rgba(255, 255, 255, 0.5);
+
+    /* -- Glow (hover/live-state accents, matched to the semantic palette) - */
+    --glow-brand: rgba(59, 111, 224, 0.32);
+    --glow-optimal: rgba(15, 157, 99, 0.3);
+    --glow-elevated: rgba(194, 120, 3, 0.28);
+    --glow-high: rgba(221, 92, 46, 0.28);
+    --glow-critical: rgba(209, 59, 59, 0.3);
+
+    /* -- Ambient background blobs ----------------------------------------
+     * Fed to the fixed AmbientBackground layer behind the app shell / auth
+     * aside. Kept faint in light mode — a wash, not a spotlight. */
+    --ambient-1: rgba(59, 111, 224, 0.16);
+    --ambient-2: rgba(15, 157, 99, 0.1);
+    --ambient-3: rgba(109, 74, 235, 0.1);
+    --scanline-opacity: 0;
+
+    /* Chart line/area glow — off in light mode (crisp, printable lines). */
+    --chart-glow-blur: 0px;
+    /* Hero-number text glow — off in light mode (dark text needs no halo). */
+    --text-glow-brand: transparent;
+  }
+
+  .dark {
+    --bg-canvas: #07080b;
+    --bg-surface: #131519;
+    --bg-surface-raised: #191c22;
+    --bg-subtle: #1c2027;
+    --bg-inset: #0f1216;
+
+    --border-subtle: #242832;
+    --border-strong: #333947;
+
+    --text-primary: #f1f3f7;
+    --text-secondary: #a4acbb;
+    --text-muted: #757d8c;
+    --text-inverse: #0c1017;
+
+    --brand: #5a80f0;
+    --brand-hover: #7595f4;
+    --brand-subtle: #172038;
+    --brand-ring: rgba(90, 128, 240, 0.4);
+    --brand-fg: #ffffff;
+
+    --status-optimal: #22c07d;
+    --status-optimal-subtle: #0e2b1f;
+    --status-optimal-fg: #6fdaad;
+
+    --status-elevated: #e0a02b;
+    --status-elevated-subtle: #2e2410;
+    --status-elevated-fg: #f0c470;
+
+    --status-high: #f07a4a;
+    --status-high-subtle: #331b12;
+    --status-high-fg: #f7a884;
+
+    --status-critical: #ef5f5f;
+    --status-critical-subtle: #331616;
+    --status-critical-fg: #f79797;
+
+    --series-1: #5a80f0;
+    --series-2: #0fa077;
+    --series-3: #bf7d00;
+    --series-4: #2f9d55;
+    --series-5: #8a72ee;
+    --series-6: #e2585a;
+    --series-7: #c96693;
+    --series-8: #d96832;
+
+    /* Sequential anchor flips: the lightest step is now the one nearest the
+       dark surface, so "near zero" still recedes. */
+    --seq-1: #161b26;
+    --seq-2: #1c2740;
+    --seq-3: #24365d;
+    --seq-4: #2d477c;
+    --seq-5: #375a9d;
+    --seq-6: #4470c2;
+    --seq-7: #5a80f0;
+
+    --chart-grid: #21252e;
+    --chart-axis: #333947;
+
+    --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35), 0 1px 3px rgba(0, 0, 0, 0.3);
+    --shadow-md: 0 2px 4px rgba(0, 0, 0, 0.35), 0 4px 12px rgba(0, 0, 0, 0.4);
+    --shadow-lg: 0 4px 8px rgba(0, 0, 0, 0.4), 0 12px 28px rgba(0, 0, 0, 0.5);
+    --shadow-pop: 0 8px 16px rgba(0, 0, 0, 0.45), 0 20px 48px rgba(0, 0, 0, 0.6);
+
+    /* -- Glass surfaces (dark) — deeper, more transparent, lit from behind */
+    --glass-bg: rgba(19, 21, 27, 0.5);
+    --glass-bg-strong: rgba(19, 21, 27, 0.72);
+    --glass-border: rgba(255, 255, 255, 0.09);
+    --glass-highlight: rgba(255, 255, 255, 0.07);
+
+    /* -- Glow (dark) — brighter, this is where "Glass Control Room" lives - */
+    --glow-brand: rgba(90, 128, 240, 0.55);
+    --glow-optimal: rgba(34, 192, 125, 0.5);
+    --glow-elevated: rgba(224, 160, 43, 0.45);
+    --glow-high: rgba(240, 122, 74, 0.45);
+    --glow-critical: rgba(239, 95, 95, 0.5);
+
+    --ambient-1: rgba(90, 128, 240, 0.24);
+    --ambient-2: rgba(34, 192, 125, 0.14);
+    --ambient-3: rgba(138, 114, 238, 0.18);
+    --scanline-opacity: 0.035;
+
+    /* Chart lines get a soft neon trace in dark mode. */
+    --chart-glow-blur: 5px;
+    --text-glow-brand: var(--glow-brand);
+  }
+
+  * {
+    border-color: var(--border-subtle);
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--bg-canvas);
+    color: var(--text-primary);
+    font-family: var(--font-sans), system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-size: 0.875rem;
+    line-height: 1.375rem;
+  }
+
+  /* A single, consistent focus treatment across every interactive element. */
+  :focus-visible {
+    outline: 2px solid var(--brand);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
+  }
+
+  ::selection {
+    background: var(--brand-ring);
+  }
+
+  /* Scrollbars styled to match the surface rather than the OS default. */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 999px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--text-muted);
+    background-clip: content-box;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer components {
+  /* Skeleton shimmer used by every loading placeholder. */
+  .skeleton {
+    position: relative;
+    overflow: hidden;
+    background-color: var(--bg-subtle);
+  }
+  .skeleton::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background-image: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(255, 255, 255, 0.55) 50%,
+      transparent 100%
+    );
+    animation: shimmer 1.6s infinite;
+  }
+  .dark .skeleton::after {
+    background-image: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(255, 255, 255, 0.06) 50%,
+      transparent 100%
+    );
+  }
+
+  /* Tabular figures for anything that must align in a column. */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum';
+  }
+
+  /* -- Glass Control Room primitives --------------------------------------
+     Frosted top-level surface. Falls back to a solid surface colour on
+     browsers without backdrop-filter support (the @supports negation below),
+     so nothing goes translucent-on-opaque. */
+  .glass {
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    backdrop-filter: blur(20px) saturate(150%);
+    -webkit-backdrop-filter: blur(20px) saturate(150%);
+  }
+  .glass-strong {
+    background: var(--glass-bg-strong);
+    border: 1px solid var(--glass-border);
+    backdrop-filter: blur(24px) saturate(160%);
+    -webkit-backdrop-filter: blur(24px) saturate(160%);
+  }
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .glass {
+      background: var(--bg-surface);
+    }
+    .glass-strong {
+      background: var(--bg-surface-raised);
+    }
+  }
+
+  /* A 1px inner highlight along the top edge — the detail that sells "glass"
+     rather than "translucent grey box". */
+  .glass-edge {
+    box-shadow: inset 0 1px 0 var(--glass-highlight);
+  }
+
+  /* Faint CRT-style scanlines, dark mode only (--scanline-opacity is 0 in
+     light). Applied to a decorative overlay, never to text-bearing content. */
+  .scanlines {
+    background-image: repeating-linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.6) 0px,
+      rgba(255, 255, 255, 0.6) 1px,
+      transparent 1px,
+      transparent 3px
+    );
+    opacity: var(--scanline-opacity);
+    mix-blend-mode: overlay;
+  }
+
+  /* Gradient-position sweep used under hero numbers and active nav rails. */
+  .glow-sweep {
+    background-size: 200% 100%;
+    animation: glow-sweep 2.8s ease-in-out infinite;
+  }
+  @keyframes glow-sweep {
+    0%,
+    100% {
+      background-position: 0% 0;
+    }
+    50% {
+      background-position: 100% 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .glow-sweep {
+      animation: none;
+    }
+  }
+}

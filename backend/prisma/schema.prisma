@@ -1,0 +1,166 @@
+// Prisma schema for the Energy Consumption Monitoring Dashboard.
+//
+// Domain shape:
+//   Location 1--* Device 1--* Reading      (time-series consumption)
+//                 Device 1--* Alert        (anomaly / threshold / offline events)
+//   User                                   (auth + per-user notification prefs)
+//   Setting                                (global tariff / carbon-intensity config)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum Role {
+  ADMIN
+  VIEWER
+}
+
+/// Device categories. Solar is a *producer*: its readings are stored as
+/// negative kWh so that netting works naturally in aggregate queries.
+enum DeviceType {
+  HVAC
+  LIGHTING
+  APPLIANCE
+  REFRIGERATION
+  EV_CHARGER
+  MACHINERY
+  SERVER_ROOM
+  SOLAR
+}
+
+enum DeviceStatus {
+  ONLINE
+  OFFLINE
+  IDLE
+}
+
+enum AlertType {
+  SPIKE
+  THRESHOLD
+  OFFLINE
+  EFFICIENCY
+}
+
+enum Severity {
+  INFO
+  WARNING
+  CRITICAL
+}
+
+// ---------------------------------------------------------------------------
+// Models
+// ---------------------------------------------------------------------------
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  role         Role     @default(VIEWER)
+
+  // Preferences (surfaced on the Settings page).
+  theme           String   @default("system") // "light" | "dark" | "system"
+  notifyInApp     Boolean  @default(true)
+  notifyEmail     Boolean  @default(false)
+  notifyMinLevel  Severity @default(WARNING)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  acknowledgedAlerts Alert[] @relation("AlertAcknowledgedBy")
+
+  @@index([email])
+}
+
+model Location {
+  id       String  @id @default(cuid())
+  name     String  @unique
+  address  String?
+  timezone String  @default("America/New_York")
+
+  devices   Device[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Device {
+  id              String       @id @default(cuid())
+  name            String
+  type            DeviceType
+  status          DeviceStatus @default(ONLINE)
+  /// Nameplate capacity in kW — used for utilisation / efficiency scoring.
+  ratedCapacityKw Float
+  /// Optional per-interval alert threshold in kWh. Null = no threshold alerts.
+  thresholdKwh    Float?
+  installedAt     DateTime     @default(now())
+
+  locationId String
+  location   Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  readings Reading[]
+  alerts   Alert[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([locationId, name])
+  @@index([locationId])
+  @@index([type])
+}
+
+/// One consumption sample. The simulator writes these on a fixed 15-minute
+/// cadence so that every chart bucket is directly comparable.
+model Reading {
+  id        BigInt   @id @default(autoincrement())
+  deviceId  String
+  device    Device   @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  timestamp DateTime
+  /// Energy for the interval in kWh (negative for solar generation).
+  kwh       Float
+  /// Interval cost in the configured currency, already tariff-adjusted.
+  cost      Float
+
+  @@unique([deviceId, timestamp])
+  @@index([timestamp])
+  @@index([deviceId, timestamp])
+}
+
+model Alert {
+  id       String    @id @default(cuid())
+  deviceId String
+  device   Device    @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  type     AlertType
+  severity Severity
+  message  String
+  /// Observed value that triggered the alert (kWh).
+  value    Float
+  /// Expected/baseline value for context in the UI (kWh).
+  baseline Float?
+
+  timestamp        DateTime  @default(now())
+  acknowledged     Boolean   @default(false)
+  acknowledgedAt   DateTime?
+  acknowledgedById String?
+  acknowledgedBy   User?     @relation("AlertAcknowledgedBy", fields: [acknowledgedById], references: [id], onDelete: SetNull)
+
+  @@index([timestamp])
+  @@index([acknowledged])
+  @@index([deviceId, timestamp])
+}
+
+/// Simple key/value store for global config (tariff rate, carbon intensity,
+/// currency). Editable by admins from the Settings page.
+model Setting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
